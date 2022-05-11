@@ -1,0 +1,112 @@
+- hosts: all
+  become: true
+  gather_facts: true
+  vars_files:
+    - secrets.yml
+  vars:
+    user:
+      name: "{{ ansible_user }}"
+
+  tasks:
+    - name: Add docker apt signing key
+      ansible.builtin.apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        keyring: /usr/share/keyrings/docker-archive-keyring.gpg
+        state: present
+      tags: apt
+
+    - name: Add docker apt repository
+      ansible.builtin.apt_repository:
+        repo: deb [arch=arm64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu {{ ansible_facts['lsb']['codename'] }} stable
+        filename: docker
+        state: present
+      tags: apt
+
+    - name: Install packages
+      ansible.builtin.apt:
+        pkg:
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose
+          - docker-compose-plugin
+        update_cache: true
+        state: latest
+      tags: apt
+
+    - name: Update all packages to their latest version
+      apt:
+        name: "*"
+        state: latest
+      tags: update
+
+    - name: Add user
+      ansible.builtin.user:
+        name: "{{ new_user }}"
+        password: "{{ new_user_password | password_hash('sha512') }}"
+        shell: /bin/bash
+        groups: sudo, docker
+        append: yes
+        update_password: on_create
+        state: present
+      tags: user
+
+    - name: Allow password-less sudo
+      community.general.sudoers:
+        name: "{{ new_user }}"
+        user: "{{ new_user }}"
+        commands: ALL
+        state: present
+      tags: user
+
+    - name: Copy SSH key
+      ansible.posix.authorized_key:
+        user: "{{ new_user }}"
+        manage_dir: true
+        key: "{{ lookup('file', '~/.ssh/id_rsa.pub') }}"
+        state: present
+      tags: user
+
+    - name: Set hostname to 'unifi'
+      ansible.builtin.hostname:
+        name: unifi
+        use: systemd
+      tags: system
+
+    - name: Set timezone to 'CST'
+      community.general.timezone:
+        name: America/Chicago
+      tags: system
+
+    - name: Enable docker service at boot
+      ansible.builtin.systemd:
+        name: docker
+        enabled: true
+      tags: system
+
+    - name: Copy docker-compose
+      ansible.builtin.copy:
+        src: ../docker-compose.yml
+        dest: "/home/{{ new_user }}/unifi-controller/"
+      tags: docker
+
+    - name: Create and start unifi-controller
+      community.docker.docker_compose:
+        project_src: "/home/{{ new_user }}/unifi-controller"
+        build: true
+        state: present
+      register: docker_compose_output
+      tags: docker
+
+    - ansible.builtin.debug:
+        var: docker_compose_output
+      tags: docker
+
+    - ansible.builtin.assert:
+        that:
+          - "docker_compose_output.services.unifi_controller.unifi_controller.state.running"
+      tags: docker
