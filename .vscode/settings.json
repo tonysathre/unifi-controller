@@ -1,5 +1,0 @@
-{
-    "yaml.schemas": {
-        "https://raw.githubusercontent.com/ansible-community/schemas/main/f/ansible.json#/definitions/playbook": "file:///mnt/c/Users/Tony/git/unifi-controller/ansible/pi-setup.yml"
-    }
-}
